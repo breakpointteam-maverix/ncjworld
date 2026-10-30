@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="th"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Admin | TrippleNCJ</title><meta name="robots" content="noindex">
+<link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;600&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#080808;--card:#171717;--gold:#c9a35b;--txt:#f1ebde;--mut:#c5baa9;--line:rgba(201,163,91,.2)}
+*{box-sizing:border-box}body{margin:0;font-family:Kanit,sans-serif;background:var(--bg);color:var(--txt);padding:24px 5%}
+h1{font-size:1.5rem;border-left:4px solid var(--gold);padding-left:12px}h2{font-size:1.1rem;margin:0 0 12px}
+.box{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:18px;margin-bottom:20px;max-width:900px}
+label{display:block;font-size:.85rem;color:var(--mut);margin:10px 0 4px}
+input,textarea,select{width:100%;padding:9px;background:#0d0d0d;border:1px solid var(--line);color:var(--txt);border-radius:5px;font:inherit}
+.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
+button{padding:9px 18px;border:1px solid var(--gold);background:transparent;color:var(--gold);border-radius:5px;font:inherit;cursor:pointer}
+button.main{background:var(--gold);color:#000}button:hover{opacity:.85}button:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px solid var(--gold)}
+.item{display:grid;grid-template-columns:90px 1fr auto;gap:12px;align-items:center;padding:10px 0;border-top:1px solid var(--line)}
+.item img{width:90px;aspect-ratio:16/9;object-fit:cover;border-radius:4px;background:#000}
+.item small{color:var(--mut)}.acts{display:flex;gap:6px;flex-wrap:wrap}.acts button{padding:4px 10px;font-size:.8rem}
+#msg{position:sticky;bottom:10px;max-width:900px;padding:10px 14px;border-radius:6px;display:none}
+#msg.ok{display:block;background:#1d3a24}#msg.err{display:block;background:#4a1f1f}.hint{font-size:.8rem;color:var(--mut)}
+</style></head><body>
+<h1>จัดการคลิป TrippleNCJ</h1>
+
+<div class="box"><h2>1. เชื่อมต่อ GitHub</h2>
+<div class="row">
+<div><label>Owner</label><input id="owner" value="breakpointteam-maverix"></div>
+<div><label>Repo</label><input id="repo" value="tripplencj"></div>
+<div><label>Branch</label><input id="branch" value="main"></div></div>
+<label>Personal Access Token (Fine-grained, สิทธิ์ Contents: Read and write เฉพาะ repo นี้)</label>
+<input id="token" type="password" placeholder="github_pat_...">
+<p class="hint">เก็บไว้ในเบราว์เซอร์เครื่องนี้เท่านั้น ไม่ถูกส่งไปที่อื่นนอกจาก api.github.com</p>
+<button class="main" onclick="load()">เชื่อมต่อและโหลดรายการ</button></div>
+
+<div class="box"><h2 id="formTitle">2. โพสต์คลิปใหม่</h2>
+<div class="row">
+<div><label>Season</label><input id="season" type="number" value="1" min="1"></div>
+<div><label>ตอน (เช่น EP.9)</label><input id="ep"></div>
+<div><label>เรทอายุ</label><input id="rate" value="13+"></div>
+<div><label>ความยาว</label><input id="dur" placeholder="3 นาที 10 วินาที"></div></div>
+<label>ชื่อตอน</label><input id="title">
+<label>ลิงก์คลิป (Google Drive หรือ YouTube)</label><input id="link" placeholder="https://drive.google.com/file/d/.../view หรือ https://youtu.be/...">
+<label>รูปปก (เว้นว่าง = ดึงอัตโนมัติ)</label><input id="poster" placeholder="https://... หรือชื่อไฟล์ใน repo">
+<label>เรื่องย่อ</label><textarea id="desc" rows="3"></textarea>
+<label>ทีมงาน</label><input id="credits" value="Nikonpan, Nasa and Newtun">
+<p style="margin-top:14px"><button class="main" onclick="save()" id="saveBtn">โพสต์คลิป</button>
+<button onclick="resetForm()">ล้างฟอร์ม</button></p></div>
+
+<div class="box"><h2>3. คลิปทั้งหมด</h2><div id="list"><p class="hint">ยังไม่ได้โหลด</p></div></div>
+<div id="msg" role="status"></div>
+
+<script>
+const $=id=>document.getElementById(id);let eps=[],sha=null,editing=-1;
+const FILE="episodes.json";
+["owner","repo","branch","token"].forEach(k=>{try{const v=localStorage.getItem("a_"+k);if(v)$(k).value=v}catch(e){}});
+function say(t,ok=true){const m=$("msg");m.className=ok?"ok":"err";m.textContent=t;setTimeout(()=>m.className="",6000)}
+const api=()=>`https://api.github.com/repos/${$("owner").value}/${$("repo").value}/contents/${FILE}`;
+const hdr=()=>({Authorization:"Bearer "+$("token").value,Accept:"application/vnd.github+json"});
+const b64=s=>btoa(String.fromCharCode(...new TextEncoder().encode(s)));
+const unb64=s=>new TextDecoder().decode(Uint8Array.from(atob(s.replace(/\n/g,"")),c=>c.charCodeAt(0)));
+
+async function load(){
+  try{["owner","repo","branch","token"].forEach(k=>localStorage.setItem("a_"+k,$(k).value))}catch(e){}
+  const r=await fetch(api()+"?ref="+$("branch").value+"&t="+Date.now(),{headers:hdr()});
+  if(r.status==404){eps=[];sha=null;render();return say("ยังไม่มี episodes.json จะสร้างใหม่เมื่อโพสต์คลิปแรก")}
+  if(!r.ok)return say("โหลดไม่สำเร็จ ("+r.status+") ตรวจสอบ token และชื่อ repo",false);
+  const j=await r.json();sha=j.sha;eps=JSON.parse(unb64(j.content));render();say("โหลดแล้ว "+eps.length+" คลิป");
+}
+function parseLink(u){
+  u=u.trim();let m;
+  if(m=u.match(/drive\.google\.com\/file\/d\/([\w-]+)/)||u.match(/drive\.google\.com\/open\?id=([\w-]+)/))
+    return{videoUrl:`https://drive.google.com/file/d/${m[1]}/preview`,poster:`https://drive.google.com/thumbnail?id=${m[1]}&sz=w640`};
+  if(m=u.match(/(?:youtu\.be\/|v=|embed\/|shorts\/)([\w-]{11})/))
+    return{videoUrl:`https://www.youtube.com/embed/${m[1]}`,poster:`https://img.youtube.com/vi/${m[1]}/hqdefault.jpg`};
+  return null;
+}
+async function commit(msg){
+  const body={message:msg,content:b64(JSON.stringify(eps,null,2)),branch:$("branch").value};if(sha)body.sha=sha;
+  const r=await fetch(api(),{method:"PUT",headers:hdr(),body:JSON.stringify(body)});
+  if(!r.ok){say("บันทึกไม่สำเร็จ ("+r.status+") ลองกด 'เชื่อมต่อและโหลด' ใหม่แล้วทำซ้ำ",false);return false}
+  sha=(await r.json()).content.sha;return true;
+}
+async function save(){
+  if(!$("token").value)return say("ใส่ token ก่อน",false);
+  const p=parseLink($("link").value);
+  if(!p&&!(editing>=0&&!$("link").value))return say("ลิงก์ต้องเป็น Google Drive หรือ YouTube",false);
+  if(!$("ep").value||!$("title").value)return say("กรอกตอนและชื่อตอน",false);
+  const old=editing>=0?eps[editing]:{};
+  const o={season:+$("season").value,ep:$("ep").value,title:$("title").value,dur:$("dur").value,rate:$("rate").value,
+    videoUrl:p?p.videoUrl:old.videoUrl,poster:$("poster").value||(p?p.poster:old.poster),desc:$("desc").value,credits:$("credits").value};
+  editing>=0?eps[editing]=o:eps.push(o);
+  $("saveBtn").disabled=true;
+  if(await commit((editing>=0?"Edit ":"Add ")+o.ep)){say("บันทึกแล้ว เว็บจะอัปเดตใน 1-2 นาที");resetForm()}
+  $("saveBtn").disabled=false;render();
+}
+function edit(i){const e=eps[i];editing=i;
+  ["season","ep","title","dur","rate","desc","credits","poster"].forEach(k=>$(k).value=e[k]||"");
+  $("link").value="";$("link").placeholder="เว้นว่าง = ใช้ลิงก์เดิม";$("formTitle").textContent="2. แก้ไข "+e.ep;$("saveBtn").textContent="บันทึกการแก้ไข";scrollTo(0,0)}
+function resetForm(){editing=-1;["ep","title","dur","link","poster","desc"].forEach(k=>$(k).value="");
+  $("formTitle").textContent="2. โพสต์คลิปใหม่";$("saveBtn").textContent="โพสต์คลิป"}
+async function del(i){if(!confirm("ลบ "+eps[i].ep+" ?"))return;const e=eps.splice(i,1)[0];
+  if(await commit("Remove "+e.ep))say("ลบแล้ว");render()}
+async function mv(i,d){const j=i+d;if(j<0||j>=eps.length)return;[eps[i],eps[j]]=[eps[j],eps[i]];
+  if(await commit("Reorder"))render()}
+function render(){
+  $("list").innerHTML=eps.length?eps.map((e,i)=>`<div class="item"><img src="${e.poster}" alt="" onerror="this.style.visibility='hidden'">
+  <div><b>S${e.season} ${e.ep}: ${e.title}</b><br><small>${e.dur||""}</small></div>
+  <div class="acts"><button onclick="mv(${i},-1)" aria-label="ขึ้น">↑</button><button onclick="mv(${i},1)" aria-label="ลง">↓</button>
+  <button onclick="edit(${i})">แก้ไข</button><button onclick="del(${i})">ลบ</button></div></div>`).join(""):'<p class="hint">ยังไม่มีคลิป</p>';
+}
+</script></body></html>
